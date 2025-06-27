@@ -204,9 +204,11 @@
 
         // Logique WebRTC
         function startPeerConnection(targetUserForSignal) {
+            console.log('Démarrage de PeerConnection avec cible:', targetUserForSignal);
             peerConnection = new RTCPeerConnection(config);
 
             peerConnection.onicecandidate = (event) => {
+                console.log('ICE Candidate:', event.candidate);
                 if (event.candidate) {
                     connection.send(JSON.stringify({
                         type: 'signal',
@@ -219,12 +221,28 @@
             };
 
             peerConnection.ontrack = (event) => {
-                document.getElementById('remoteVideo').srcObject = event.streams[0];
+                console.log('Flux distant reçu (ontrack) :', event.streams[0]);
+                if (event.streams && event.streams[0]) {
+                    document.getElementById('remoteVideo').srcObject = event.streams[0];
+                    console.log('Flux distant assigné à remoteVideo.');
+                } else {
+                    console.warn('Aucun flux valide dans event.streams[0] pour ontrack.');
+                }
+            };
+
+            peerConnection.onconnectionstatechange = (event) => {
+                console.log('Connection State Change:', peerConnection.connectionState);
+            };
+
+            peerConnection.oniceconnectionstatechange = (event) => {
+                console.log('ICE Connection State Change:', peerConnection.iceConnectionState);
             };
 
             if (localStream) {
+                console.log('Ajout des pistes locales à PeerConnection.');
                 localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
             } else {
+                console.log('Démarrage du flux local avant d\'ajouter les pistes.');
                 startLocalStream().then(() => {
                     localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
                 });
@@ -256,18 +274,25 @@
         }
 
         async function handleSignal(from, signal) {
+            console.log(`Gestion du signal de ${from}:`, signal.type);
             if (signal.type === 'offer') {
-                // Si je reçois une offre, je dois créer une PeerConnection si ce n'est pas déjà fait
-                // et envoyer une réponse.
                 if (!peerConnection) {
+                    console.log('PeerConnection non existante, création pour l\'offre entrante.');
                     startPeerConnection(from); // La cible pour la réponse est l'expéditeur de l'offre
                 }
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.offer));
+                console.log('Offre distante définie. Création et envoi de la réponse.');
                 createAndSendAnswer(); // Répondre à l'offre
             } else if (signal.type === 'answer') {
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer));
+                console.log('Réponse distante définie.');
             } else if (signal.type === 'ice') {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                if (peerConnection && signal.candidate) {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                    console.log('ICE Candidate ajouté.');
+                } else {
+                    console.warn('Impossible d\'ajouter ICE Candidate: peerConnection non défini ou candidate manquant.');
+                }
             }
         }
 
