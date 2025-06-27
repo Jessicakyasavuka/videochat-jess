@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Appel Vidéo Simplifié</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        video {
+            border: 2px solid #333;
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }
+        #controls button {
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body class="container mt-4">
+
+    <h3>Appel Vidéo Simplifié</h3>
+
+    <div class="row">
+        <div class="col-md-6">
+            <h5>Ma vidéo (local)</h5>
+            <video id="localVideo" autoplay muted playsinline style="width:100%; height:auto;"></video>
+        </div>
+        <div class="col-md-6">
+            <h5>Vidéo distante</h5>
+            <video id="remoteVideo" autoplay playsinline style="width:100%; height:auto;"></video>
+        </div>
+    </div>
+
+    <div id="controls" class="mt-3">
+        <div id="initial-options">
+            <button id="createCallBtn" class="btn btn-primary mb-2">Créer un appel</button>
+            <button id="joinCallBtn" class="btn btn-secondary mb-2">Rejoindre un appel</button>
+        </div>
+
+        <div id="create-call-section" style="display:none;">
+            <p>Votre ID d'appel: <strong id="callIdDisplay"></strong>
+                <button id="copyIdBtn" class="btn btn-sm btn-outline-secondary">Copier ID</button>
+            </p>
+            <p>Lien d'invitation: <a href="#" id="inviteLink" target="_blank"></a>
+                <button id="copyLinkBtn" class="btn btn-sm btn-outline-secondary">Copier Lien</button>
+            </p>
+            <button id="startCallCreatorBtn" class="btn btn-success">Démarrer l'appel</button>
+        </div>
+
+        <div id="join-call-section" style="display:none;">
+            <input type="text" id="joinCallId" placeholder="Entrez l'ID de l'appel" class="form-control mb-2">
+            <button id="joinCallSubmitBtn" class="btn btn-success">Rejoindre</button>
+        </div>
+
+        <div id="in-call-controls" style="display:none;">
+            <input type="text" id="myUsername" placeholder="Mon nom d'utilisateur" class="form-control mb-2" disabled>
+            <button id="muteBtn" class="btn btn-warning">🔇 Mute</button>
+            <button id="hangupBtn" class="btn btn-danger">❌ Raccrocher</button>
+        </div>
+    </div>
+
+    <script>
+        let myUsername = '';
+        let currentCallId = '';
+        let connection;
+        let localStream;
+        let peerConnection;
+        let isCallCreator = false; // Pour savoir si cet utilisateur est le créateur de l'appel
+        const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+        // Générer un ID unique pour l'appel
+        function generateCallId() {
+            return Math.random().toString(36).substring(2, 9); // ID alphanumérique court
+        }
+
+        // Afficher les sections
+        function showSection(sectionId) {
+            document.getElementById('initial-options').style.display = 'none';
+            document.getElementById('create-call-section').style.display = 'none';
+            document.getElementById('join-call-section').style.display = 'none';
+            document.getElementById('in-call-controls').style.display = 'none';
+            document.getElementById(sectionId).style.display = 'block';
+        }
+
+        // Initialisation du flux local
+        async function startLocalStream() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = localStream;
+            } catch (err) {
+                console.error("Erreur d'accès à la caméra/micro:", err);
+                alert("Impossible d'accéder à la caméra/micro. Veuillez vérifier les permissions.");
+            }
+        }
+
+        // Connexion au serveur WebSocket
+        function connectWebSocket(username, creatorStatus) {
+            myUsername = username;
+            isCallCreator = creatorStatus;
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            connection = new WebSocket(`${wsProtocol}//${window.location.host}`);
+
+            connection.onopen = () => {
+                console.log("✅ Connecté au serveur WebSocket !");
+                connection.send(JSON.stringify({ type: 'login', name: myUsername }));
+
+                if (isCallCreator) {
+                    connection.send(JSON.stringify({ type: 'create_call', callId: currentCallId, name: myUsername }));
+                } else {
+                    connection.send(JSON.stringify({ type: 'join_call', callId: currentCallId, name: myUsername }));
+                }
+
+                document.getElementById('myUsername').value = myUsername; // Afficher le nom d'utilisateur
+                document.getElementById('myUsername').disabled = true;
+                showSection('in-call-controls'); // Afficher les contrôles d'appel
+            };
+
+            connection.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log('Message reçu :', data);
+
+                switch (data.type) {
+                    case 'new_participant': // Un nouveau participant a rejoint la salle
+                        alert(`Un nouveau participant a rejoint l'appel : ${data.from}`);
+                        // Si je suis le créateur, je dois initier l'offre avec ce nouveau participant
+                        if (isCallCreator) {
+                            startPeerConnection(data.from); // La cible est le nouveau participant
+                            createAndSendOffer();
+                        }
+                        break;
+                    case 'signal':
+                        handleSignal(data.from, data.signalData);
+                        break;
+                    case 'hangup':
+                        handleRemoteHangUp();
+                        break;
+                    case 'user_disconnected':
+                        alert(`${data.from} a quitté l'appel.`);
+                        // Gérer la déconnexion d'un utilisateur spécifique si nécessaire
+                        break;
+                    case 'error':
+                        alert('Erreur du serveur: ' + data.message);
+                        resetCallState();
+                        showSection('initial-options');
+                        break;
+                }
+            };
+
+            connection.onerror = (error) => {
+                console.error("❌ Erreur WebSocket :", error);
+                alert("Erreur de connexion WebSocket. Veuillez vérifier le serveur.");
+            };
+
+            connection.onclose = () => {
+                console.log("❌ Déconnecté du serveur WebSocket");
+                resetCallState();
+                alert('Déconnecté du serveur ou l\'appel a été raccroché.');
+                showSection('initial-options'); // Revenir aux options initiales
+            };
+        }
+
+        // Réinitialiser l'état de l'appel
+        function resetCallState() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            document.getElementById('remoteVideo').srcObject = null;
+            document.getElementById('localVideo').srcObject = null;
+            myUsername = '';
+            currentCallId = '';
+            isCallCreator = false;
+            document.getElementById('myUsername').disabled = false;
+            document.getElementById('myUsername').value = '';
+            document.getElementById('joinCallId').value = '';
+            document.getElementById('callIdDisplay').innerText = '';
+            document.getElementById('inviteLink').href = '#';
+            document.getElementById('inviteLink').innerText = '';
+        }
+
+        // Logique WebRTC
+        function startPeerConnection(targetUserForSignal) {
+            peerConnection = new RTCPeerConnection(config);
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    connection.send(JSON.stringify({
+                        type: 'signal',
+                        name: myUsername,
+                        target: targetUserForSignal, // La cible est l'autre utilisateur spécifique
+                        callId: currentCallId, // Inclure l'ID d'appel
+                        signalData: { type: 'ice', candidate: event.candidate }
+                    }));
+                }
+            };
+
+            peerConnection.ontrack = (event) => {
+                document.getElementById('remoteVideo').srcObject = event.streams[0];
+            };
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+            } else {
+                startLocalStream().then(() => {
+                    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+                });
+            }
+        }
+
+        async function createAndSendOffer() {
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            connection.send(JSON.stringify({
+                type: 'signal',
+                name: myUsername,
+                target: currentCallId, // La cible est l'ID de l'appel pour le routage serveur
+                callId: currentCallId,
+                signalData: { type: 'offer', offer: offer }
+            }));
+        }
+
+        async function createAndSendAnswer() {
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            connection.send(JSON.stringify({
+                type: 'signal',
+                name: myUsername,
+                target: currentCallId, // La cible est l'ID de l'appel pour le routage serveur
+                callId: currentCallId,
+                signalData: { type: 'answer', answer: answer }
+            }));
+        }
+
+        async function handleSignal(from, signal) {
+            if (signal.type === 'offer') {
+                // Si je reçois une offre, je dois créer une PeerConnection si ce n'est pas déjà fait
+                // et envoyer une réponse.
+                if (!peerConnection) {
+                    startPeerConnection(from); // La cible pour la réponse est l'expéditeur de l'offre
+                }
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.offer));
+                createAndSendAnswer(); // Répondre à l'offre
+            } else if (signal.type === 'answer') {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer));
+            } else if (signal.type === 'ice') {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+            }
+        }
+
+        function handleRemoteHangUp() {
+            alert('L\'autre partie a raccroché.');
+            resetCallState();
+            showSection('initial-options');
+        }
+
+        // Gestionnaires d'événements pour les boutons
+        document.getElementById('createCallBtn').onclick = () => {
+            currentCallId = generateCallId();
+            document.getElementById('callIdDisplay').innerText = currentCallId;
+            const inviteLink = `${window.location.origin}?callId=${currentCallId}`;
+            document.getElementById('inviteLink').href = inviteLink;
+            document.getElementById('inviteLink').innerText = inviteLink;
+            showSection('create-call-section');
+            startLocalStream(); // Démarrer le flux local dès la création de l'appel
+        };
+
+        document.getElementById('joinCallBtn').onclick = () => {
+            showSection('join-call-section');
+            startLocalStream(); // Démarrer le flux local dès la tentative de rejoindre
+        };
+
+        document.getElementById('copyIdBtn').onclick = () => {
+            navigator.clipboard.writeText(document.getElementById('callIdDisplay').innerText)
+                .then(() => alert('ID copié !'))
+                .catch(err => console.error('Erreur de copie:', err));
+        };
+
+        document.getElementById('copyLinkBtn').onclick = () => {
+            navigator.clipboard.writeText(document.getElementById('inviteLink').href)
+                .then(() => alert('Lien copié !'))
+                .catch(err => console.error('Erreur de copie:', err));
+        };
+
+        document.getElementById('startCallCreatorBtn').onclick = () => {
+            const creatorUsername = `creator-${currentCallId}`; // Nom d'utilisateur unique pour le créateur
+            connectWebSocket(creatorUsername, true); // true pour indiquer que c'est le créateur
+        };
+
+        document.getElementById('joinCallSubmitBtn').onclick = () => {
+            const joinId = document.getElementById('joinCallId').value;
+            if (joinId) {
+                currentCallId = joinId;
+                const joinerUsername = `joiner-${currentCallId}-${generateCallId()}`; // Nom d'utilisateur unique pour celui qui rejoint
+                connectWebSocket(joinerUsername, false); // false pour indiquer que c'est celui qui rejoint
+            } else {
+                alert("Veuillez entrer l'ID de l'appel à rejoindre.");
+            }
+        };
+
+        document.getElementById('muteBtn').onclick = () => {
+            if (localStream) {
+                localStream.getAudioTracks().forEach(track => track.enabled = !track.enabled);
+                document.getElementById('muteBtn').innerText = localStream.getAudioTracks()[0].enabled ? "🔇 Mute" : "🔊 Unmute";
+            }
+        };
+
+        document.getElementById('hangupBtn').onclick = () => {
+            if (connection && connection.readyState === WebSocket.OPEN) {
+                connection.send(JSON.stringify({ type: 'hangup', from: myUsername, callId: currentCallId }));
+            }
+            alert('Appel terminé.');
+            resetCallState();
+            showSection('initial-options');
+        };
+
+        // Vérifier l'URL pour un ID d'appel (pour les liens d'invitation)
+        const urlParams = new URLSearchParams(window.location.search);
+        const initialCallId = urlParams.get('callId');
+        if (initialCallId) {
+            document.getElementById('joinCallId').value = initialCallId;
+            showSection('join-call-section');
+            startLocalStream();
+        } else {
+            showSection('initial-options');
+        }
+    </script>
+
+</body>
+</html>
