@@ -55,7 +55,7 @@ httpServer.listen(HTTP_PORT, () => {
 });
 
 // Serveur WebSocket
-const wss = new WebSocket.Server({ port: WS_PORT });
+const wss = new WebSocket.Server({ server: httpServer }); // Utiliser le serveur HTTP existant
 let callRooms = {}; // Stocke les salles d'appel, chaque salle contient les utilisateurs
 
 wss.on('connection', socket => {
@@ -175,4 +175,4 @@ wss.on('connection', socket => {
     });
 });
 
-console.log(`Serveur WebSocket en écoute sur ws://localhost:${WS_PORT}`);
+// Le message de log pour le serveur WebSocket n'est plus nécessaire ici car il est géré par le serveur HTTP
