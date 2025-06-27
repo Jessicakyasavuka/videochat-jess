@@ -65,7 +65,28 @@
         let localStream;
         let peerConnection;
         let isCallCreator = false; // Pour savoir si cet utilisateur est le créateur de l'appel
-        const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+        const config = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                // Serveurs TURN publics (pour les tests, pas pour la production)
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ]
+        };
 
         // Générer un ID unique pour l'appel
         function generateCallId() {
