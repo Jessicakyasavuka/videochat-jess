@@ -64,7 +64,7 @@ function resetWebRTCState() {
 
 // Démarrer la connexion PeerConnection
 function startPeerConnection(targetUserForSignal) {
-    console.log('Démarrage de PeerConnection avec cible:', targetUserForSignal);
+    console.log(`[${myUsername}] Démarrage de PeerConnection avec cible:`, targetUserForSignal);
     peerConnection = new RTCPeerConnection(iceServersConfig);
 
     peerConnection.onicecandidate = (event) => {
@@ -111,7 +111,7 @@ function startPeerConnection(targetUserForSignal) {
 }
 
 async function createAndSendOffer() {
-    console.log('Création et envoi de l\'offre...');
+    console.log(`[${myUsername}] Création et envoi de l'offre...`);
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
     connection.send(JSON.stringify({
@@ -125,7 +125,7 @@ async function createAndSendOffer() {
 }
 
 async function createAndSendAnswer() {
-    console.log('Création et envoi de la réponse...');
+    console.log(`[${myUsername}] Création et envoi de la réponse...`);
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     connection.send(JSON.stringify({
@@ -139,24 +139,42 @@ async function createAndSendAnswer() {
 }
 
 async function handleSignal(from, signal) {
-    console.log(`Gestion du signal de ${from}:`, signal.type);
+    console.log(`[${myUsername}] Gestion du signal de ${from}:`, signal.type);
     if (signal.type === 'offer') {
         if (!peerConnection) {
-            console.log('PeerConnection non existante, création pour l\'offre entrante.');
+            console.log(`[${myUsername}] PeerConnection non existante, création pour l'offre entrante.`);
             startPeerConnection(from); // La cible pour la réponse est l'expéditeur de l'offre
         }
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.offer));
-        console.log('Offre distante définie. Création et envoi de la réponse.');
-        createAndSendAnswer(); // Répondre à l'offre
+        try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.offer));
+            console.log(`[${myUsername}] Offre distante définie. Création et envoi de la réponse.`);
+            createAndSendAnswer(); // Répondre à l'offre
+        } catch (e) {
+            console.error(`[${myUsername}] Erreur lors de la définition de l'offre distante:`, e);
+            // Gérer l'erreur, par exemple en raccrochant ou en informant l'utilisateur
+            hangUpCall(); // Raccrocher en cas d'erreur critique
+            alert(`Erreur lors de la réception de l'offre: ${e.message}`);
+        }
     } else if (signal.type === 'answer') {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer));
-        console.log('Réponse distante définie.');
+        try {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer));
+            console.log(`[${myUsername}] Réponse distante définie.`);
+        } catch (e) {
+            console.error(`[${myUsername}] Erreur lors de la définition de la réponse distante:`, e);
+            hangUpCall();
+            alert(`Erreur lors de la réception de la réponse: ${e.message}`);
+        }
     } else if (signal.type === 'ice') {
         if (peerConnection && signal.candidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
-            console.log('ICE Candidate ajouté.');
+            try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                console.log(`[${myUsername}] ICE Candidate ajouté.`);
+            } catch (e) {
+                console.error(`[${myUsername}] Erreur lors de l'ajout de ICE Candidate:`, e);
+                // Ne pas raccrocher pour un seul ICE candidate qui échoue, mais loguer
+            }
         } else {
-            console.warn('Impossible d\'ajouter ICE Candidate: peerConnection non défini ou candidate manquant.');
+            console.warn(`[${myUsername}] Impossible d'ajouter ICE Candidate: peerConnection non défini ou candidate manquant.`);
         }
     }
 }
