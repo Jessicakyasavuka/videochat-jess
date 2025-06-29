@@ -99,7 +99,7 @@
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             window.connection = new WebSocket(`${wsProtocol}//${window.location.host}`);
 
-            connection.onopen = () => {
+            window.connection.onopen = () => {
                 console.log("✅ Connecté au serveur WebSocket !");
                 window.connection.send(JSON.stringify({ type: 'login', name: window.myUsername }));
 
@@ -114,7 +114,10 @@
                 showSection('in-call-controls'); // Afficher les contrôles d'appel
 
                 // Initialiser WebRTC avec la connexion WebSocket
-                initWebRTC(window.connection, window.myUsername, window.currentCallId, window.isCallCreator);
+                // Pour call_only.html, les callbacks onIncomingCall et onCallAccepted ne sont pas directement utilisés ici
+                // car la logique est plus axée sur la création/rejoindre d'appels génériques.
+                // Cependant, pour la cohérence avec webrtc.js, nous pouvons passer des fonctions vides.
+                initWebRTC(window.connection, window.myUsername, window.currentCallId, window.isCallCreator, () => {}, () => {});
             };
 
             window.connection.onclose = () => {

@@ -9,8 +9,9 @@ const WS_PORT = process.env.PORT || 8080;   // Port pour le serveur WebSocket (R
 // Serveur HTTP pour servir les fichiers statiques
 const httpServer = http.createServer((req, res) => {
     let filePath = '.' + req.url;
-    if (filePath === './') {
-        filePath = './call_only.html'; // Servir call_only.html par défaut
+    // Si l'URL est la racine ou la racine avec des paramètres de requête, servir call_only.html
+    if (req.url === '/' || req.url.startsWith('/?')) {
+        filePath = './call_only.html';
     }
 
     const extname = String(path.extname(filePath)).toLowerCase();
