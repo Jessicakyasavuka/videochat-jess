@@ -57,6 +57,7 @@ httpServer.listen(HTTP_PORT, () => {
 // Serveur WebSocket
 const wss = new WebSocket.Server({ server: httpServer }); // Utiliser le serveur HTTP existant
 let callRooms = {}; // Stocke les salles d'appel, chaque salle contient les utilisateurs
+let usersOnline = {}; // Mappe les noms d'utilisateur aux sockets pour les appels directs
 
 wss.on('connection', socket => {
     // Attacher les informations d'utilisateur et de salle directement au socket
@@ -75,7 +76,38 @@ wss.on('connection', socket => {
         switch (data.type) {
             case 'login':
                 socket.userName = data.name;
+                usersOnline[socket.userName] = socket; // Ajouter l'utilisateur au mapping
                 console.log(`${socket.userName} est connecté au serveur de signalisation.`);
+                break;
+
+            case 'call':
+                const targetSocket = usersOnline[data.target];
+                if (targetSocket) {
+                    targetSocket.send(JSON.stringify({
+                        type: 'incoming_call',
+                        from: socket.userName,
+                        callId: data.callId // L'ID de l'appel est important pour la réponse
+                    }));
+                    console.log(`Appel de ${socket.userName} à ${data.target} (ID: ${data.callId})`);
+                } else {
+                    socket.send(JSON.stringify({ type: 'error', message: `Utilisateur ${data.target} non trouvé ou non connecté.` }));
+                    console.warn(`Tentative d'appel à un utilisateur non connecté: ${data.target}`);
+                }
+                break;
+
+            case 'accept_call':
+                const callerSocket = usersOnline[data.target]; // data.target est l'appelant
+                if (callerSocket) {
+                    callerSocket.send(JSON.stringify({
+                        type: 'call_accepted',
+                        from: socket.userName, // Celui qui accepte
+                        callId: data.callId
+                    }));
+                    console.log(`${socket.userName} a accepté l'appel de ${data.target} (ID: ${data.callId})`);
+                } else {
+                    socket.send(JSON.stringify({ type: 'error', message: `L'appelant ${data.target} non trouvé ou déconnecté.` }));
+                    console.warn(`Tentative d'accepter un appel d'un appelant non connecté: ${data.target}`);
+                }
                 break;
 
             case 'create_call':
@@ -153,6 +185,11 @@ wss.on('connection', socket => {
     });
 
     socket.on('close', () => {
+        if (socket.userName && usersOnline[socket.userName]) {
+            delete usersOnline[socket.userName]; // Supprimer l'utilisateur du mapping
+            console.log(`${socket.userName} s'est déconnecté du serveur de signalisation.`);
+        }
+
         if (socket.callId && socket.userName && callRooms[socket.callId]) {
             console.log(`${socket.userName} s'est déconnecté de la salle ${socket.callId}.`);
             delete callRooms[socket.callId][socket.userName];
@@ -169,8 +206,6 @@ wss.on('connection', socket => {
                     }));
                 }
             }
-        } else if (socket.userName) {
-            console.log(`${socket.userName} s'est déconnecté du serveur de signalisation.`);
         }
     });
 });
