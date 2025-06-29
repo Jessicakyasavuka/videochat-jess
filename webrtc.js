@@ -2,10 +2,10 @@ let localStream;
 let remoteStream;
 let peerConnection;
 let isMuted = false;
-let connection; // La connexion WebSocket sera passée ici
-let myUsername;
-let currentCallId;
-let isCallCreator;
+let connection; // Déclarée ici pour être accessible globalement dans webrtc.js
+let myUsername; // Déclarée ici pour être accessible globalement dans webrtc.js
+let currentCallId; // Déclarée ici pour être accessible globalement dans webrtc.js
+let isCallCreator; // Déclarée ici pour être accessible globalement dans webrtc.js
 
 const iceServersConfig = {
     iceServers: [
@@ -31,9 +31,11 @@ const iceServersConfig = {
 
 // Accès à la caméra et au micro
 async function startLocalStream() {
+    console.log('Tentative de démarrage du flux local...');
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         document.getElementById('localVideo').srcObject = localStream;
+        console.log('Flux local démarré avec succès.');
     } catch (err) {
         console.error("Erreur d'accès à la caméra/micro:", err);
         alert("Impossible d'accéder à la caméra/micro. Veuillez vérifier les permissions.");
@@ -62,6 +64,7 @@ function startPeerConnection(targetUserForSignal) {
     peerConnection.onicecandidate = (event) => {
         console.log('ICE Candidate:', event.candidate);
         if (event.candidate) {
+            console.log('Envoi de ICE Candidate au serveur.');
             connection.send(JSON.stringify({
                 type: 'signal',
                 name: myUsername,
@@ -102,6 +105,7 @@ function startPeerConnection(targetUserForSignal) {
 }
 
 async function createAndSendOffer() {
+    console.log('Création et envoi de l\'offre...');
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
     connection.send(JSON.stringify({
@@ -111,9 +115,11 @@ async function createAndSendOffer() {
         callId: currentCallId,
         signalData: { type: 'offer', offer: offer }
     }));
+    console.log('Offre envoyée.');
 }
 
 async function createAndSendAnswer() {
+    console.log('Création et envoi de la réponse...');
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     connection.send(JSON.stringify({
@@ -123,6 +129,7 @@ async function createAndSendAnswer() {
         callId: currentCallId,
         signalData: { type: 'answer', answer: answer }
     }));
+    console.log('Réponse envoyée.');
 }
 
 async function handleSignal(from, signal) {
@@ -163,7 +170,7 @@ function toggleMute() {
     });
 
     isMuted = !isMuted;
-    // document.getElementById('muteButton').innerText = isMuted ? "Unmute" : "Mute"; // Cette partie sera gérée par call_only.html
+    document.getElementById('muteBtn').innerText = isMuted ? "🔊 Unmute" : "🔇 Mute";
 }
 
 // Fonction pour Raccrocher
@@ -177,7 +184,7 @@ function hangUpCall() {
 }
 
 // Initialisation de la logique WebRTC et gestion des messages WebSocket
-function initWebRTC(wsConnection, user, callId, creatorStatus) {
+function initWebRTC(wsConnection, user, callId, creatorStatus, onIncomingCallCallback, onCallAcceptedCallback) {
     connection = wsConnection;
     myUsername = user;
     currentCallId = callId;
@@ -206,8 +213,23 @@ function initWebRTC(wsConnection, user, callId, creatorStatus) {
                 break;
             case 'error':
                 alert('Erreur du serveur: ' + data.message);
-                // resetCallState(); // Cette partie sera gérée par call_only.html
-                // showSection('initial-options'); // Cette partie sera gérée par call_only.html
+                break;
+            case 'incoming_call':
+                if (onIncomingCallCallback) {
+                    onIncomingCallCallback(data.from, data.callId);
+                }
+                break;
+            case 'call_accepted':
+                if (onCallAcceptedCallback) {
+                    onCallAcceptedCallback(data.from);
+                }
+                // Si nous sommes l'appelant et que l'appel est accepté, nous devons initier la PeerConnection et envoyer l'offre.
+                // Ceci est déjà géré par new_participant si le serveur envoie ce type de message.
+                // Si le serveur envoie 'call_accepted' sans 'new_participant', nous devons le gérer ici.
+                if (isCallCreator) { // Si je suis celui qui a initié l'appel
+                    startPeerConnection(data.from); // Démarrer la PeerConnection avec celui qui a accepté
+                    createAndSendOffer(); // Envoyer l'offre
+                }
                 break;
         }
     };
@@ -233,3 +255,7 @@ window.toggleMute = toggleMute;
 window.hangUpCall = hangUpCall;
 window.startPeerConnection = startPeerConnection; // Exposer pour le créateur d'appel
 window.createAndSendOffer = createAndSendOffer; // Exposer pour le créateur d'appel
+window.myUsername = myUsername; // Exposer myUsername
+window.currentCallId = currentCallId; // Exposer currentCallId
+window.isCallCreator = isCallCreator; // Exposer isCallCreator
+window.connection = connection; // Exposer la connexion WebSocket

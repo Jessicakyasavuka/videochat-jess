@@ -60,10 +60,8 @@
 
     <script src="webrtc.js"></script>
     <script>
-        let myUsername = '';
-        let currentCallId = '';
-        let connection; // La connexion WebSocket
-        let isCallCreator = false; // Pour savoir si cet utilisateur est le créateur de l'appel
+        // Les variables myUsername, currentCallId, connection, isCallCreator sont maintenant gérées par webrtc.js
+        // et sont accessibles via l'objet window.
 
         // Générer un ID unique pour l'appel
         function generateCallId() {
@@ -83,9 +81,9 @@
         function resetCallState() {
             // Appeler la fonction de réinitialisation de webrtc.js
             resetWebRTCState();
-            myUsername = '';
-            currentCallId = '';
-            isCallCreator = false;
+            window.myUsername = '';
+            window.currentCallId = '';
+            window.isCallCreator = false;
             document.getElementById('myUsername').disabled = false;
             document.getElementById('myUsername').value = '';
             document.getElementById('joinCallId').value = '';
@@ -96,37 +94,37 @@
 
         // Connexion au serveur WebSocket
         function connectWebSocket(username, creatorStatus) {
-            myUsername = username;
-            isCallCreator = creatorStatus;
+            window.myUsername = username;
+            window.isCallCreator = creatorStatus;
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            connection = new WebSocket(`${wsProtocol}//${window.location.host}`);
+            window.connection = new WebSocket(`${wsProtocol}//${window.location.host}`);
 
             connection.onopen = () => {
                 console.log("✅ Connecté au serveur WebSocket !");
-                connection.send(JSON.stringify({ type: 'login', name: myUsername }));
+                window.connection.send(JSON.stringify({ type: 'login', name: window.myUsername }));
 
-                if (isCallCreator) {
-                    connection.send(JSON.stringify({ type: 'create_call', callId: currentCallId, name: myUsername }));
+                if (window.isCallCreator) {
+                    window.connection.send(JSON.stringify({ type: 'create_call', callId: window.currentCallId, name: window.myUsername }));
                 } else {
-                    connection.send(JSON.stringify({ type: 'join_call', callId: currentCallId, name: myUsername }));
+                    window.connection.send(JSON.stringify({ type: 'join_call', callId: window.currentCallId, name: window.myUsername }));
                 }
 
-                document.getElementById('myUsername').value = myUsername; // Afficher le nom d'utilisateur
+                document.getElementById('myUsername').value = window.myUsername; // Afficher le nom d'utilisateur
                 document.getElementById('myUsername').disabled = true;
                 showSection('in-call-controls'); // Afficher les contrôles d'appel
 
                 // Initialiser WebRTC avec la connexion WebSocket
-                initWebRTC(connection, myUsername, currentCallId, isCallCreator);
+                initWebRTC(window.connection, window.myUsername, window.currentCallId, window.isCallCreator);
             };
 
-            connection.onclose = () => {
+            window.connection.onclose = () => {
                 console.log("❌ Déconnecté du serveur WebSocket");
                 resetCallState(); // Réinitialiser l'état de l'UI
                 alert('Déconnecté du serveur ou l\'appel a été raccroché.');
                 showSection('initial-options'); // Revenir aux options initiales
             };
 
-            connection.onerror = (error) => {
+            window.connection.onerror = (error) => {
                 console.error("❌ Erreur WebSocket :", error);
                 alert("Erreur de connexion WebSocket. Veuillez vérifier le serveur.");
                 resetCallState();
@@ -136,17 +134,20 @@
 
         // Gestionnaires d'événements pour les boutons
         document.getElementById('createCallBtn').onclick = () => {
-            currentCallId = generateCallId();
-            document.getElementById('callIdDisplay').innerText = currentCallId;
-            const inviteLink = `${window.location.origin}?callId=${currentCallId}`;
+            window.currentCallId = generateCallId();
+            document.getElementById('callIdDisplay').innerText = window.currentCallId;
+            const inviteLink = `${window.location.origin}?callId=${window.currentCallId}`;
             document.getElementById('inviteLink').href = inviteLink;
             document.getElementById('inviteLink').innerText = inviteLink;
             showSection('create-call-section');
+            console.log('Appel de startLocalStream() pour créer un appel.');
             startLocalStream(); // Démarrer le flux local dès la création de l'appel
         };
 
         document.getElementById('joinCallBtn').onclick = () => {
+            console.log('Clic sur le bouton "Rejoindre un appel".');
             showSection('join-call-section');
+            console.log('Appel de startLocalStream() pour rejoindre un appel.');
             startLocalStream(); // Démarrer le flux local dès la tentative de rejoindre
         };
 
@@ -163,16 +164,18 @@
         };
 
         document.getElementById('startCallCreatorBtn').onclick = () => {
-            const creatorUsername = `creator-${currentCallId}`; // Nom d'utilisateur unique pour le créateur
+            console.log('Clic sur le bouton "Démarrer l\'appel" (créateur).');
+            const creatorUsername = `creator-${window.currentCallId}`; // Nom d'utilisateur unique pour le créateur
             connectWebSocket(creatorUsername, true); // true pour indiquer que c'est le créateur
             // La PeerConnection et l'offre seront initiées par initWebRTC et new_participant dans webrtc.js
         };
 
         document.getElementById('joinCallSubmitBtn').onclick = () => {
+            console.log('Clic sur le bouton "Rejoindre" (participant).');
             const joinId = document.getElementById('joinCallId').value;
             if (joinId) {
-                currentCallId = joinId;
-                const joinerUsername = `joiner-${currentCallId}-${generateCallId()}`; // Nom d'utilisateur unique pour celui qui rejoint
+                window.currentCallId = joinId;
+                const joinerUsername = `joiner-${window.currentCallId}-${generateCallId()}`; // Nom d'utilisateur unique pour celui qui rejoint
                 connectWebSocket(joinerUsername, false); // false pour indiquer que c'est celui qui rejoint
             } else {
                 alert("Veuillez entrer l'ID de l'appel à rejoindre.");
@@ -180,13 +183,12 @@
         };
 
         document.getElementById('muteBtn').onclick = () => {
-            toggleMute(); // Appelle la fonction de webrtc.js
-            document.getElementById('muteBtn').innerText = localStream.getAudioTracks()[0].enabled ? "🔇 Mute" : "🔊 Unmute";
+            toggleMute(); // Appelle la fonction de webrtc.js, qui mettra à jour le texte du bouton
         };
 
         document.getElementById('hangupBtn').onclick = () => {
-            if (connection && connection.readyState === WebSocket.OPEN) {
-                connection.send(JSON.stringify({ type: 'hangup', from: myUsername, callId: currentCallId }));
+            if (window.connection && window.connection.readyState === WebSocket.OPEN) {
+                window.connection.send(JSON.stringify({ type: 'hangup', from: window.myUsername, callId: window.currentCallId }));
             }
             hangUpCall(); // Appelle la fonction de webrtc.js pour fermer la PeerConnection
             alert('Appel terminé.');
